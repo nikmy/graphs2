@@ -170,7 +170,7 @@ Weight MSTWeightPrim(const WeightedGraph& g) {
     queue.push({0, 0});
 
     while (!queue.empty()) {
-        auto [weight, v] = queue.top();
+        auto[weight, v] = queue.top();
         queue.pop();
         if (used[v]) {
             continue;
