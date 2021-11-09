@@ -4,21 +4,19 @@
 #include <stdexcept>
 #include <cstring>
 
-namespace graph
-{
+namespace graph {
 using Vertex = int64_t;
 using Edge = int64_t;
 
-class NotImplementedError : public std::runtime_error
-{
- public:
+class NotImplementedError : public std::runtime_error {
+public:
     explicit NotImplementedError(const char* method_name)
-        : std::runtime_error((std::string("NotImplementedError: ") + method_name).c_str()) {}
+        : std::runtime_error((std::string("NotImplementedError: ") + method_name).c_str()) {
+    }
 };
 
-class IGraph
-{
- public:
+class IGraph {
+public:
     virtual void AddEdge(Vertex from, Vertex to) = 0;
     virtual Vertex AddVertex() = 0;
 
@@ -42,25 +40,23 @@ class IGraph
         return n_edges_;
     }
 
- protected:
+protected:
     size_t n_vertices_;
     size_t n_edges_;
     bool is_directed_;
 
-    IGraph(size_t n_vertices, bool is_directed)
-        : n_vertices_(n_vertices),
-          n_edges_(0),
-          is_directed_(is_directed) {}
+    IGraph(size_t n_vertices, bool is_directed) : n_vertices_(n_vertices), n_edges_(0), is_directed_(is_directed) {
+    }
 };
 
-class Graph : public IGraph
-{
+class Graph : public IGraph {
     using EdgeList = std::vector<Edge>;
     using AdjLists = std::vector<EdgeList>;
 
- public:
+public:
     Graph(size_t n_vertices, bool is_directed)
-        : IGraph(n_vertices, is_directed), adj_lists_(n_vertices), edge_begins_(), edge_ends_() {}
+        : IGraph(n_vertices, is_directed), adj_lists_(n_vertices), edge_begins_(), edge_ends_() {
+    }
 
     void AddEdge(Vertex from, Vertex to) override {
         adj_lists_[from].push_back(static_cast<Edge>(n_edges_++));
@@ -81,7 +77,7 @@ class Graph : public IGraph
 
     std::unordered_set<Vertex> Neighbors(Vertex v) const override {
         std::unordered_set<Vertex> neighbors;
-        for (auto e: adj_lists_[v]) {
+        for (auto e : adj_lists_[v]) {
             neighbors.insert(edge_ends_[e]);
         }
         return neighbors;
@@ -103,7 +99,7 @@ class Graph : public IGraph
         return edge_ends_[e];
     }
 
- private:
+private:
     AdjLists adj_lists_;
     std::vector<Vertex> edge_begins_;
     std::vector<Vertex> edge_ends_;
@@ -111,11 +107,10 @@ class Graph : public IGraph
 
 using Weight = int64_t;
 
-class WeightedGraph : public Graph
-{
- public:
-    WeightedGraph(size_t n_vertices, bool is_directed)
-        : Graph(n_vertices, is_directed) {}
+class WeightedGraph : public Graph {
+public:
+    WeightedGraph(size_t n_vertices, bool is_directed) : Graph(n_vertices, is_directed) {
+    }
 
     void AddEdge(Vertex, Vertex) override {
         throw NotImplementedError("WeightedGraph::AddEdge");
@@ -133,17 +128,17 @@ class WeightedGraph : public Graph
         return edge_weights_[e];
     }
 
- private:
+private:
     std::vector<Weight> edge_weights_;
 };
 
-template<class T>
-class DSU
-{
- public:
+template <class T>
+class DSU {
+public:
     using Item = T;
 
-    DSU() : pres_(), rank_(), size_(0) {}
+    DSU() : pres_(), rank_(), size_(0) {
+    }
 
     explicit DSU(size_t init_size) : DSU() {
         pres_.reserve(init_size);
@@ -183,7 +178,7 @@ class DSU
         return size_;
     }
 
- private:
+private:
     std::vector<Item> pres_;
     std::vector<size_t> rank_;
     size_t size_;
@@ -208,10 +203,10 @@ Weight MSTWeightKruskal(const WeightedGraph& g) {
     return mst_weight;
 }
 
-}
+}  // namespace graph
 
-using std::cout;
 using std::cin;
+using std::cout;
 
 int main() {
     std::ios_base::sync_with_stdio(false);
