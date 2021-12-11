@@ -1,12 +1,11 @@
 #include <iostream>
 #include <vector>
-#include <unordered_set>
 #include <stdexcept>
 #include <cstring>
 
 namespace graph {
 using Vertex = int64_t;
-using Edge = int64_t;
+using EdgeID = int64_t;
 
 using EdgeProperty = int64_t;
 
@@ -19,55 +18,53 @@ public:
 
 class IGraph {
 public:
-    virtual void AddEdge(Vertex, Vertex, EdgeProperty = 0) = 0;
-
+    virtual void AddEdge(Vertex from, Vertex to, EdgeProperty = 0) = 0;
     virtual Vertex AddVertex() = 0;
 
-    virtual std::unordered_set<Vertex> Neighbors(Vertex v) const = 0;
+    virtual std::vector<Vertex> Neighbors(Vertex v) const = 0;
 
-    virtual const std::unordered_set<Vertex>& NeighborsByReference(Vertex) const {
+    virtual const std::vector<Vertex>& NeighborsByReference(Vertex) const {
         throw NotImplementedError("NeighborsByReference");
     }
 
-    virtual std::vector<Edge> OutgoingEdges(Vertex) const = 0;
+    virtual std::vector<EdgeID> OutgoingEdges(Vertex) const = 0;
 
-    virtual const std::vector<Edge>& OutgoingEdgesByReference(Vertex) const {
-        throw NotImplementedError("OutgoingEdgesByReference");
+    virtual const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex) const {
+        throw NotImplementedError("NeighborsByReference");
     }
 
-    size_t NVertices() const {
-        return n_vertices_;
-    }
+    virtual size_t NVertices() const = 0;
+    virtual size_t NEdges() const = 0;
 
-    size_t NEdges() const {
-        return n_edges_;
-    }
+    virtual Vertex EdgeEnd(EdgeID) const = 0;
 
-protected:
-    size_t n_vertices_;
-    size_t n_edges_;
-    bool is_directed_;
-
-    IGraph(size_t n_vertices, bool is_directed) : n_vertices_(n_vertices), n_edges_(0), is_directed_(is_directed) {
-    }
+    virtual EdgeProperty EdgeEdgeProperty(EdgeID) const {
+        throw NotImplementedError("EdgeEdgeProperty");
+    };
 };
 
 class AdjListsGraph : public IGraph {
-    using EdgeList = std::vector<Edge>;
+    using EdgeList = std::vector<EdgeID>;
     using AdjLists = std::vector<EdgeList>;
 
 public:
     AdjListsGraph(size_t n_vertices, bool is_directed)
-        : IGraph(n_vertices, is_directed), adj_lists_(n_vertices), edge_begins_(), edge_ends_() {
+        : n_vertices_(n_vertices), n_edges_(0), is_directed_(is_directed), adj_lists_(n_vertices), edge_ends_() {
+    }
+
+    size_t NVertices() const override {
+        return n_vertices_;
+    }
+
+    size_t NEdges() const override {
+        return n_edges_;
     }
 
     void AddEdge(Vertex from, Vertex to, EdgeProperty = 0) override {
-        adj_lists_[from].push_back(static_cast<Edge>(n_edges_++));
-        edge_begins_.push_back(from);
-        edge_ends_.push_back(to);
+        adj_lists_[from].push_back(static_cast<EdgeID>(n_edges_++));
+        edge_ends_.emplace_back(to);
         if (!is_directed_) {
-            adj_lists_[to].push_back(static_cast<Edge>(n_edges_++));
-            edge_begins_.push_back(to);
+            adj_lists_[to].push_back(static_cast<EdgeID>(n_edges_++));
             edge_ends_.push_back(from);
         }
     }
@@ -78,39 +75,49 @@ public:
         return new_vertex;
     }
 
-    std::unordered_set<Vertex> Neighbors(Vertex v) const override {
-        std::unordered_set<Vertex> neighbors;
-        for (auto e : adj_lists_[v]) {
-            neighbors.insert(edge_ends_[e]);
+    std::vector<Vertex> Neighbors(Vertex vertex) const override {
+        std::vector<Vertex> neighbors;
+        for (auto edge_id : adj_lists_[vertex]) {
+            neighbors.push_back(edge_ends_[edge_id]);
         }
         return neighbors;
     }
 
-    std::vector<Edge> OutgoingEdges(Vertex v) const override {
-        return adj_lists_[v];
+    std::vector<EdgeID> OutgoingEdges(Vertex vertex) const override {
+        return adj_lists_[vertex];
     }
 
-    const std::vector<Edge>& OutgoingEdgesByReference(Vertex v) const override {
-        return adj_lists_[v];
+    const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex vertex) const override {
+        return adj_lists_[vertex];
     }
 
-    Vertex EdgeBegin(Edge e) const {
-        return edge_begins_[e];
+    EdgeID EdgeEnd(EdgeID edge_id) const override {
+        return edge_ends_[edge_id];
     }
 
-    Vertex EdgeEnd(Edge e) const {
-        return edge_ends_[e];
-    }
+protected:
+    size_t n_vertices_;
+    size_t n_edges_;
+    bool is_directed_;
 
 private:
     AdjLists adj_lists_;
-    std::vector<Vertex> edge_begins_;
     std::vector<Vertex> edge_ends_;
 };
 
 using Flow = EdgeProperty;
 
-class NetworkGraph : public AdjListsGraph {
+class INetwork {
+public:
+    virtual EdgeID EdgeEnd(EdgeID) const = 0;
+    virtual Flow EdgeCap(EdgeID) const = 0;
+    virtual Flow& EdgeFlow(EdgeID) const = 0;
+    virtual Flow& BackFlow(EdgeID) const = 0;
+    virtual const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex vertex) const = 0;
+    virtual size_t NVertices() const = 0;
+};
+
+class NetworkGraph : public AdjListsGraph, public INetwork {
 public:
     explicit NetworkGraph(size_t n_vertices) : AdjListsGraph(n_vertices, false) {
     }
@@ -123,16 +130,28 @@ public:
         edge_flows_.push_back(0);
     }
 
-    Flow EdgeCap(Edge e) const {
-        return edge_caps_[e];
+    Flow EdgeCap(EdgeID edge_id) const override {
+        return edge_caps_[edge_id];
     }
 
-    Flow& EdgeFlow(Edge e) const {
-        return edge_flows_[e];
+    Flow& EdgeFlow(EdgeID edge_id) const override {
+        return edge_flows_[edge_id];
     }
 
-    Flow& BackFlow(Edge e) const {
-        return edge_flows_[e ^ 1];
+    Flow& BackFlow(EdgeID edge_id) const override {
+        return edge_flows_[edge_id ^ 1];
+    }
+
+    const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex vertex) const override {
+        return AdjListsGraph::OutgoingEdgesByReference(vertex);
+    }
+
+    EdgeID EdgeEnd(EdgeID edge_id) const override {
+        return AdjListsGraph::EdgeEnd(edge_id);
+    }
+
+    size_t NVertices() const override {
+        return AdjListsGraph::NVertices();
     }
 
 private:
@@ -141,7 +160,7 @@ private:
 };
 
 namespace impl {
-Flow FordFulkersonDFS(const NetworkGraph& net, Vertex v, Flow path_flow, Vertex sink, std::vector<bool>& visited) {
+Flow FordFulkersonDFS(const INetwork& net, Vertex v, Flow path_flow, Vertex sink, std::vector<bool>& visited) {
     if (v == sink) {
         return path_flow;
     }
@@ -162,12 +181,12 @@ Flow FordFulkersonDFS(const NetworkGraph& net, Vertex v, Flow path_flow, Vertex 
 }
 }  // namespace impl
 
-Flow FindMaxFlow(const NetworkGraph& net, Vertex source, Vertex sink) {
-    Flow iter_result = 0;
+Flow FindMaxFlow(const INetwork& net, Vertex source, Vertex sink) {
+    Flow delta_flow = 0;
     do {
         std::vector<bool> visited(net.NVertices(), false);
-        iter_result = impl::FordFulkersonDFS(net, source, INT64_MAX, sink, visited);
-    } while (iter_result > 0);
+        delta_flow = impl::FordFulkersonDFS(net, source, INT64_MAX, sink, visited);
+    } while (delta_flow > 0);
 
     Flow max_flow = 0;
     for (auto e : net.OutgoingEdgesByReference(source)) {
