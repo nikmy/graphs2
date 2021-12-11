@@ -8,7 +8,9 @@
 
 namespace graph {
 using Vertex = int64_t;
-using Edge = int64_t;
+using EdgeID = int64_t;
+
+static const Vertex kUnreachable = INT64_MIN;
 
 class NotImplementedError : public std::runtime_error {
 public:
@@ -17,53 +19,57 @@ public:
     }
 };
 
+using Weight = int64_t;
+
 class IGraph {
 public:
-    virtual void AddEdge(Vertex from, Vertex to) = 0;
+    virtual void AddEdge(Vertex from, Vertex to, Weight = 0) = 0;
     virtual Vertex AddVertex() = 0;
 
-    virtual std::unordered_set<Vertex> Neighbors(Vertex v) const = 0;
+    virtual std::vector<Vertex> Neighbors(Vertex v) const = 0;
 
-    virtual const std::unordered_set<Vertex>& NeighborsByReference(Vertex) const {
+    virtual const std::vector<Vertex>& NeighborsByReference(Vertex) const {
         throw NotImplementedError("NeighborsByReference");
     }
 
-    virtual std::vector<Edge> OutgoingEdges(Vertex) const = 0;
+    virtual std::vector<EdgeID> OutgoingEdges(Vertex) const = 0;
 
-    virtual const std::vector<Edge>& OutgoingEdgesByReference(Vertex) const {
+    virtual const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex) const {
         throw NotImplementedError("NeighborsByReference");
     }
 
-    size_t NVertices() const {
-        return n_vertices_;
-    }
+    virtual size_t NVertices() const = 0;
+    virtual size_t NEdges() const = 0;
 
-    size_t NEdges() const {
-        return n_edges_;
-    }
+    virtual Vertex EdgeEnd(EdgeID) const = 0;
 
-protected:
-    size_t n_vertices_;
-    size_t n_edges_;
-    bool is_directed_;
-
-    IGraph(size_t n_vertices, bool is_directed) : n_vertices_(n_vertices), n_edges_(0), is_directed_(is_directed) {
-    }
+    virtual Weight EdgeWeight(EdgeID) const {
+        throw NotImplementedError("EdgeWeight");
+    };
 };
 
 class Graph : public IGraph {
-    using EdgeList = std::vector<Edge>;
+    using EdgeList = std::vector<EdgeID>;
     using AdjLists = std::vector<EdgeList>;
 
 public:
-    Graph(size_t n_vertices, bool is_directed) : IGraph(n_vertices, is_directed), adj_lists_(n_vertices), edge_ends_() {
+    Graph(size_t n_vertices, bool is_directed)
+        : n_vertices_(n_vertices), n_edges_(0), is_directed_(is_directed), adj_lists_(n_vertices), edge_ends_() {
     }
 
-    void AddEdge(Vertex from, Vertex to) override {
-        adj_lists_[from].push_back(static_cast<Edge>(n_edges_++));
+    size_t NVertices() const override {
+        return n_vertices_;
+    }
+
+    size_t NEdges() const override {
+        return n_edges_;
+    }
+
+    void AddEdge(Vertex from, Vertex to, Weight = 0) override {
+        adj_lists_[from].push_back(static_cast<EdgeID>(n_edges_++));
         edge_ends_.emplace_back(to);
         if (!is_directed_) {
-            adj_lists_[to].push_back(static_cast<Edge>(n_edges_++));
+            adj_lists_[to].push_back(static_cast<EdgeID>(n_edges_++));
             edge_ends_.push_back(from);
         }
     }
@@ -74,25 +80,30 @@ public:
         return new_vertex;
     }
 
-    std::unordered_set<Vertex> Neighbors(Vertex v) const override {
-        std::unordered_set<Vertex> neighbors;
-        for (auto e : adj_lists_[v]) {
-            neighbors.insert(edge_ends_[e]);
+    std::vector<Vertex> Neighbors(Vertex vertex) const override {
+        std::vector<Vertex> neighbors;
+        for (auto edge_id : adj_lists_[vertex]) {
+            neighbors.push_back(edge_ends_[edge_id]);
         }
         return neighbors;
     }
 
-    std::vector<Edge> OutgoingEdges(Vertex v) const override {
-        return adj_lists_[v];
+    std::vector<EdgeID> OutgoingEdges(Vertex vertex) const override {
+        return adj_lists_[vertex];
     }
 
-    const std::vector<Edge>& OutgoingEdgesByReference(Vertex v) const override {
-        return adj_lists_[v];
+    const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex vertex) const override {
+        return adj_lists_[vertex];
     }
 
-    Edge GetEdgeEnd(Edge e) const {
-        return edge_ends_[e];
+    EdgeID EdgeEnd(EdgeID edge_id) const override {
+        return edge_ends_[edge_id];
     }
+
+protected:
+    size_t n_vertices_;
+    size_t n_edges_;
+    bool is_directed_;
 
 private:
     AdjLists adj_lists_;
@@ -100,7 +111,7 @@ private:
 };
 
 class FastNeighborsGraph : public Graph {
-    using NeighborsList = std::unordered_set<Vertex>;
+    using NeighborsList = std::vector<Vertex>;
     using NeighborsData = std::vector<NeighborsList>;
 
 public:
@@ -108,11 +119,11 @@ public:
         : Graph(n_vertices, is_directed), neighbors_data_(n_vertices) {
     }
 
-    void AddEdge(Vertex from, Vertex to) override {
+    void AddEdge(Vertex from, Vertex to, Weight = 0) override {
         Graph::AddEdge(from, to);
-        neighbors_data_[from].insert(to);
+        neighbors_data_[from].push_back(to);
         if (!is_directed_) {
-            neighbors_data_[to].insert(from);
+            neighbors_data_[to].push_back(from);
         }
     }
 
@@ -122,30 +133,24 @@ public:
         return new_vertex;
     }
 
-    std::unordered_set<Vertex> Neighbors(Vertex v) const override {
-        return neighbors_data_[v];
+    std::vector<Vertex> Neighbors(Vertex vertex) const override {
+        return neighbors_data_[vertex];
     }
 
-    const std::unordered_set<Vertex>& NeighborsByReference(Vertex v) const override {
-        return neighbors_data_[v];
+    const std::vector<Vertex>& NeighborsByReference(Vertex vertex) const override {
+        return neighbors_data_[vertex];
     }
 
 private:
     NeighborsData neighbors_data_;
 };
 
-using Weight = int64_t;
-
 class WeightedGraph : public FastNeighborsGraph {
 public:
     WeightedGraph(size_t n_vertices, bool is_directed) : FastNeighborsGraph(n_vertices, is_directed) {
     }
 
-    void AddEdge(Vertex, Vertex) override {
-        throw NotImplementedError("WeightedGraph::AddEdge");
-    }
-
-    void AddWeightedEdge(Vertex from, Vertex to, Weight weight) {
+    void AddEdge(Vertex from, Vertex to, Weight weight) override {
         FastNeighborsGraph::AddEdge(from, to);
         edge_weights_.push_back(weight);
         if (!is_directed_) {
@@ -153,42 +158,63 @@ public:
         }
     }
 
-    Weight EdgeWeight(Edge e) const {
-        return edge_weights_[e];
+    Weight EdgeWeight(EdgeID edge_id) const override {
+        return edge_weights_[edge_id];
     }
 
 private:
     std::vector<Weight> edge_weights_;
 };
 
-using WeightedEdgeData = std::pair<Weight, Vertex>;
+struct WeightedEdgeData {
+    Weight weight;
+    Vertex dst;
+    Vertex src;
 
-Weight DirectedMSTWeightPrim(const WeightedGraph& g) {
+    bool operator>(const WeightedEdgeData& rhs) const {
+        return std::make_pair(weight, dst) > std::make_pair(rhs.weight, rhs.dst);
+    }
+};
+
+struct MSTData {
+    std::vector<WeightedEdgeData> edges;
+    Weight weight;
+};
+
+decltype(auto) DirectedMSTPrim(const IGraph& g) {
     Weight mst_weight = 0;
     std::priority_queue<WeightedEdgeData, std::vector<WeightedEdgeData>, std::greater<WeightedEdgeData>> queue;
     std::vector<bool> used(g.NVertices(), false);
-    queue.push({0, 0});
+    queue.push({0, 0, kUnreachable});
+
+    std::vector<WeightedEdgeData> mst;
 
     while (!queue.empty()) {
-        auto[weight, v] = queue.top();
+        auto[weight, current, prev] = queue.top();
         queue.pop();
-        if (used[v]) {
+        if (used[current]) {
             continue;
         }
 
-        used[v] = true;
-        mst_weight += weight;
+        used[current] = true;
+        if (prev != kUnreachable) {
+            mst.push_back({weight, current, prev});
+            mst_weight += weight;
+        }
 
-        for (auto e : g.OutgoingEdgesByReference(v)) {
-            auto u = g.GetEdgeEnd(e);
-            auto vu_weight = g.EdgeWeight(e);
-            if (!used[u]) {
-                queue.push({vu_weight, u});
+        for (auto edge_id : g.OutgoingEdgesByReference(current)) {
+            auto next = g.EdgeEnd(edge_id);
+            if (!used[next]) {
+                queue.push({g.EdgeWeight(edge_id), next, current});
             }
         }
     }
 
-    return mst_weight;
+    return MSTData{mst, mst_weight};
+}
+
+Weight DirectedMSTWeightPrim(const IGraph& g) {
+    return DirectedMSTPrim(g).weight;
 }
 
 }  // namespace graph
@@ -215,11 +241,11 @@ int main() {
     auto g = graph::WeightedGraph(n_spies + 1, false);
     for (graph::Vertex from = 0; from < n_spies; ++from) {
         for (graph::Vertex to = from + 1; to < n_spies; ++to) {
-            g.AddWeightedEdge(from, to, weights[from][to]);
+            g.AddEdge(from, to, weights[from][to]);
         }
         graph::Weight spy_price = 0;
         cin >> spy_price;
-        g.AddWeightedEdge(from, n_spies, spy_price);
+        g.AddEdge(from, n_spies, spy_price);
     }
 
     cout << graph::DirectedMSTWeightPrim(g) << '\n';
