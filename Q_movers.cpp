@@ -8,9 +8,13 @@
 
 namespace graph {
 using Vertex = size_t;
-using Edge = size_t;
+using EdgeID = size_t;
+using Weight = int64_t;
 
-using EdgeProperty = int64_t;
+struct EdgeData {
+    Vertex src;
+    Vertex dst;
+};
 
 class NotImplementedError : public std::runtime_error {
 public:
@@ -21,7 +25,7 @@ public:
 
 class IGraph {
 public:
-    virtual void AddEdge(Vertex, Vertex, EdgeProperty = 0) = 0;
+    virtual void AddEdge(Vertex, Vertex, Weight = 0) = 0;
 
     virtual Vertex AddVertex() = 0;
 
@@ -31,10 +35,19 @@ public:
         throw NotImplementedError("NeighborsByReference");
     }
 
-    virtual std::vector<Edge> OutgoingEdges(Vertex) const = 0;
+    virtual std::vector<EdgeID> OutgoingEdges(Vertex) const = 0;
 
-    virtual const std::vector<Edge>& OutgoingEdgesByReference(Vertex) const {
+    virtual const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex) const {
         throw NotImplementedError("OutgoingEdgesByReference");
+    }
+
+    virtual Vertex EdgeEnd(EdgeID) const = 0;
+    virtual Weight EdgeWeight(EdgeID) const {
+        throw NotImplementedError("EdgeWeight");
+    }
+
+    virtual EdgeData GetEdgeData(EdgeID) const {
+        throw NotImplementedError("GetEdgeData");
     }
 
     size_t NVertices() const {
@@ -55,7 +68,7 @@ protected:
 };
 
 class AdjListsGraph : public IGraph {
-    using EdgeList = std::vector<Edge>;
+    using EdgeList = std::vector<EdgeID>;
     using AdjLists = std::vector<EdgeList>;
 
 public:
@@ -63,7 +76,7 @@ public:
         : IGraph(n_vertices, is_directed), adj_lists_(n_vertices), edge_begins_(), edge_ends_() {
     }
 
-    void AddEdge(Vertex from, Vertex to, EdgeProperty = 0) override {
+    void AddEdge(Vertex from, Vertex to, Weight = 0) override {
         adj_lists_[from].push_back(n_edges_++);
         edge_begins_.push_back(from);
         edge_ends_.push_back(to);
@@ -88,28 +101,28 @@ public:
         return neighbors;
     }
 
-    std::vector<Edge> OutgoingEdges(Vertex v) const override {
+    std::vector<EdgeID> OutgoingEdges(Vertex v) const override {
         return adj_lists_[v];
     }
 
-    const std::vector<Edge>& OutgoingEdgesByReference(Vertex v) const override {
+    const std::vector<EdgeID>& OutgoingEdgesByReference(Vertex v) const override {
         return adj_lists_[v];
     }
 
-    Edge GetEdge(Vertex from, Vertex to) const {
+    EdgeID GetEdge(Vertex from, Vertex to) const {
         return adj_lists_[from][to];
     }
 
-    Vertex EdgeBegin(Edge e) const {
+    Vertex EdgeBegin(EdgeID e) const {
         return edge_begins_[e];
     }
 
-    Vertex EdgeEnd(Edge e) const {
+    Vertex EdgeEnd(EdgeID e) const override {
         return edge_ends_[e];
     }
 
-    decltype(auto) AsPair(Edge e) const {
-        return std::make_pair(edge_begins_[e], edge_ends_[e]);
+    EdgeData GetEdgeData(EdgeID edge_id) const override {
+        return EdgeData{edge_begins_[edge_id], edge_ends_[edge_id]};
     }
 
     size_t Degree(Vertex v) const {
@@ -122,7 +135,7 @@ private:
     std::vector<Vertex> edge_ends_;
 };
 
-using Weight = EdgeProperty;
+using Weight = Weight;
 
 class WeightedGraph : public AdjListsGraph {
 
@@ -138,11 +151,11 @@ public:
         }
     }
 
-    const Weight& EdgeWeight(Edge e) const {
+    Weight EdgeWeight(EdgeID e) const override {
         return edge_weights_[e];
     }
 
-    Weight& EdgeWeight(Edge e) {
+    Weight& EdgeWeight(EdgeID e) {
         return edge_weights_[e];
     }
 
@@ -152,16 +165,15 @@ private:
 
 using Distance = Weight;
 static constexpr Distance kInfDistance = INT32_MAX;
-using DistanceMatrix = std::vector<std::vector<Distance>>;
 
 namespace impl {
 
-bool Relax(const WeightedGraph& g, Edge e, std::vector<Distance>& dist) {
-    auto[u, v] = g.AsPair(e);
-    if (dist[u] == kInfDistance || dist[v] <= dist[u] + g.EdgeWeight(e)) {
+bool Relax(const IGraph& g, EdgeID e, std::vector<Distance>& dist) {
+    auto[src, dst] = g.GetEdgeData(e);
+    if (dist[src] == kInfDistance || dist[dst] <= dist[src] + g.EdgeWeight(e)) {
         return false;
     }
-    dist[v] = dist[u] + g.EdgeWeight(e);
+    dist[dst] = dist[src] + g.EdgeWeight(e);
     return true;
 }
 
@@ -169,12 +181,12 @@ bool Relax(const WeightedGraph& g, Edge e, std::vector<Distance>& dist) {
 
 namespace detail {
 
-void FordBellman(const WeightedGraph& g, Vertex start, std::vector<Weight>& dist) {
+void FordBellman(const IGraph& g, Vertex start, std::vector<Weight>& dist) {
     dist.assign(g.NVertices(), kInfDistance);
     dist[start] = 0;
     for (size_t i = 0; i < g.NVertices() - 1; ++i) {
         bool any_relaxed = false;
-        for (Edge e = 0; e < g.NEdges(); ++e) {
+        for (EdgeID e = 0; e < g.NEdges(); ++e) {
             any_relaxed |= impl::Relax(g, e, dist);
         }
         if (!any_relaxed) {
@@ -183,26 +195,36 @@ void FordBellman(const WeightedGraph& g, Vertex start, std::vector<Weight>& dist
     }
 }
 
-void Dijkstra(const WeightedGraph& g, Vertex source, std::vector<Distance>& dist, DistanceMatrix* wm = nullptr) {
+struct WeightedEdgeData {
+    Weight weight;
+    Vertex dst;
+    Vertex src;
+
+    bool operator>(const WeightedEdgeData& rhs) const {
+        return std::make_pair(weight, dst) > std::make_pair(rhs.weight, rhs.dst);
+    }
+};
+
+void Dijkstra(const IGraph& g, Vertex source, std::vector<Distance>& dist) {
     dist.assign(g.NVertices(), kInfDistance);
-    std::priority_queue<std::pair<int64_t, Vertex>> queue;
+    std::priority_queue<WeightedEdgeData, std::vector<WeightedEdgeData>, std::greater<WeightedEdgeData>> queue;
     std::vector<bool> proc(g.NVertices(), false);
 
     dist[source] = 0;
-    queue.emplace(0, source);
+    queue.push({0, source, kInfDistance});
     while (!queue.empty()) {
-        auto u = queue.top().second;
+        auto curr = queue.top().dst;
         queue.pop();
-        if (proc[u]) {
+        if (proc[curr]) {
             continue;
         }
-        proc[u] = true;
-        for (auto e : g.OutgoingEdgesByReference(u)) {
-            auto v = g.EdgeEnd(e);
-            auto w = wm ? (*wm)[u][v] : g.EdgeWeight(e);
-            if (dist[u] + w < dist[v]) {
-                dist[v] = dist[u] + w;
-                queue.emplace(-dist[v], v);
+        proc[curr] = true;
+        for (auto edge_id : g.OutgoingEdgesByReference(curr)) {
+            auto next = g.EdgeEnd(edge_id);
+            auto weight = g.EdgeWeight(edge_id);
+            if (dist[curr] + weight < dist[next]) {
+                dist[next] = dist[curr] + weight;
+                queue.push({dist[next], next, curr});
             }
         }
     }
@@ -212,7 +234,7 @@ enum SingleSourceAlgorithm { SS_FORD_BELLMAN, SS_DIJKSTRA };
 
 }  // namespace detail
 
-decltype(auto) FindShortestPaths(const WeightedGraph& g, Vertex source,
+decltype(auto) FindShortestPaths(const IGraph& g, Vertex source,
                                  detail::SingleSourceAlgorithm algorithm = detail::SS_DIJKSTRA) {
     std::vector<Distance> dist;
     switch (algorithm) {
@@ -272,12 +294,12 @@ int main() {
     used_floors.insert(target_floor);
     used_floors.insert(0);
 
-    auto it = used_floors.begin();
-    auto prev = it;
-    while (++it != used_floors.end()) {
-        auto diff = static_cast<Price>(*it - *prev);
-        g.AddEdge(*prev, *it, diff * upstairs_price);
-        g.AddEdge(*it, *prev, diff * downstairs_price);
+    auto curr = used_floors.begin();
+    auto prev = curr;
+    while (++curr != used_floors.end()) {
+        auto diff = static_cast<Price>(*curr - *prev);
+        g.AddEdge(*prev, *curr, diff * upstairs_price);
+        g.AddEdge(*curr, *prev, diff * downstairs_price);
         ++prev;
     }
 
