@@ -3,45 +3,45 @@
 
 namespace graph {
 
-class DSU {
+class DisjointedSetForest {
 public:
-    DSU() : pres_(), rank_(), size_(0) {
+    DisjointedSetForest() : root_(), rank_(), size_(0) {
     }
 
-    explicit DSU(size_t init_size) : DSU() {
-        pres_.reserve(init_size);
+    explicit DisjointedSetForest(size_t init_size) : DisjointedSetForest() {
+        root_.reserve(init_size);
         rank_.reserve(init_size);
         for (size_t i = 0; i < init_size; ++i) {
-            AddSingleElementSet();
+            AddVertex();
         }
     }
 
-    void AddSingleElementSet() {
-        pres_.push_back(pres_.size());
+    void AddVertex() {
+        root_.push_back(root_.size());
         rank_.push_back(1);
         ++size_;
     }
 
-    size_t FindSet(size_t item_id) {
-        if (pres_[item_id] == item_id) {
-            return item_id;
+    size_t GetRoot(size_t vertex_id) {
+        if (root_[vertex_id] == vertex_id) {
+            return vertex_id;
         }
-        return pres_[item_id] = FindSet(pres_[item_id]);
+        return root_[vertex_id] = GetRoot(root_[vertex_id]);
     }
 
-    bool IsInSameSet(size_t item1_id, size_t item2_id) {
-        return FindSet(item1_id) == FindSet(item2_id);
+    bool HaveSameRoot(size_t vertex1_id, size_t vertex2_id) {
+        return GetRoot(vertex1_id) == GetRoot(vertex2_id);
     }
 
-    void Unite(size_t item1_id, size_t item2_id) {
-        auto[set1, set2] = std::make_pair(FindSet(item1_id), FindSet(item2_id));
+    void UniteTrees(size_t vertex1_id, size_t vertex2_id) {
+        auto[set1, set2] = std::make_pair(GetRoot(vertex1_id), GetRoot(vertex2_id));
         if (set1 == set2) {
             return;
         }
         if (rank_[set1] < rank_[set2]) {
-            pres_[set1] = set2;
+            root_[set1] = set2;
         } else {
-            pres_[set2] = set1;
+            root_[set2] = set1;
             if (rank_[set1] == rank_[set2]) {
                 ++rank_[set1];
             }
@@ -49,12 +49,12 @@ public:
         --size_;
     }
 
-    size_t NSets() {
+    size_t NTrees() {
         return size_;
     }
 
 private:
-    std::vector<size_t> pres_;
+    std::vector<size_t> root_;
     std::vector<size_t> rank_;
     size_t size_;
 };
@@ -64,26 +64,26 @@ private:
 template <class Weight = size_t>
 class WeightedForest {
 public:
-    explicit WeightedForest(size_t n_trees) : dsu_(n_trees), weights_(n_trees, 0) {
+    explicit WeightedForest(size_t n_trees) : forest_(n_trees), weight_(n_trees, 0) {
     }
 
     Weight GetTreeWeight(size_t item_id) {
-        return weights_[dsu_.FindSet(item_id)];
+        return weight_[forest_.GetRoot(item_id)];
     }
 
     void AddEdge(size_t src_id, size_t dst_id, Weight weight) {
-        if (dsu_.IsInSameSet(src_id - 1, dst_id - 1)) {
-            weights_[dsu_.FindSet(src_id - 1)] += weight;
+        if (forest_.HaveSameRoot(src_id - 1, dst_id - 1)) {
+            weight_[forest_.GetRoot(src_id - 1)] += weight;
         } else {
-            auto new_weight = weights_[dsu_.FindSet(src_id - 1)] + weights_[dsu_.FindSet(dst_id - 1)] + weight;
-            dsu_.Unite(src_id - 1, dst_id - 1);
-            weights_[dsu_.FindSet(src_id - 1)] = new_weight;
+            auto new_weight = weight_[forest_.GetRoot(src_id - 1)] + weight_[forest_.GetRoot(dst_id - 1)] + weight;
+            forest_.UniteTrees(src_id - 1, dst_id - 1);
+            weight_[forest_.GetRoot(src_id - 1)] = new_weight;
         }
     }
 
 private:
-    graph::DSU dsu_;
-    std::vector<Weight> weights_;
+    graph::DisjointedSetForest forest_;
+    std::vector<Weight> weight_;
 };
 
 using std::cin;
